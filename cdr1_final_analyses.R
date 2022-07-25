@@ -1,3 +1,6 @@
+############ install and load all libraries to run the script
+
+library(readxl)
 library(dplyr)
 library(ggplot2)
 library(tmod)
@@ -10,101 +13,33 @@ library(clusterProfiler)
 
 
 
-convertMouseGeneList <- function(x){
-require("biomaRt")
-human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
-mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
-genesV2 = getLDS(attributes = c("mgi_symbol"), filters = "mgi_symbol", values = x , mart = mouse, attributesL = c("hgnc_symbol"), martL = human, uniqueRows=T)
-humanx <- unique(genesV2[, 2])
-# Print the first 6 genes found to the screen
-print(head(humanx))
-return(humanx)
-}
+#### read linear gene count data
 
-covariate <-read.table("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/SCN_9rep/covariate_file.txt", sep='\t', header=T) %>% tbl_df() %>% mutate(filename=sub("mapping/feature_counts/","", filename))%>% mutate(filename=sub(".all_mates.*","", filename))
+covariate <-read.table("./data/covariate_file_scn.txt", sep='\t', header=T) %>% tbl_df() %>% mutate(filename=sub("mapping/feature_counts/","", filename))%>% mutate(filename=sub(".all_mates.*","", filename))
 
-linear_all_scn<-list()
+linear_all_scn<-readRDS("./data/linear_all_scn.rds")
 
-for (i in covariate$filename){
-#  print (i)
-  sample_lin<-paste("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/SCN_9rep/mapping/feature_counts_cdr1/", i, ".all_mates/out/feature_counts.", i, ".all_mates.feature_counts", sep="")
-  if(file.exists(sample_lin)){
-  linear_all_scn[[i]] <- read.table(sample_lin, skip=1, header=T, sep='\t', comment.char = "") %>% tbl_df() %>% mutate(sample_id=i) %>% left_join(covariate, by=c("sample_id"="filename")) %>% mutate(sample_id=label)  %>% dplyr::select(1,7,8,10,11,6)
- colnames(linear_all_scn[[i]])[2]<-"counts" 
- colnames(linear_all_scn[[i]])[4]<-"time"
-  }else{
-    print (sample_lin)
-    }
-}
 
-linear_all_scn <- linear_all_scn %>%  bind_rows() 
+twin<-readxl::read_xls("./data/elife-10518-supp2-v2.xls") %>% filter(`WGCNA module`=="lightsteelblue1")
 
-twin<-readxl::read_xls("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/SCN/elife-10518-supp2-v2.xls") %>% filter(`WGCNA module`=="lightsteelblue1")
-
-genes<-readxl::read_xls("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/SCN/elife-10518-supp2-v2.xls") %>% filter(`WGCNA module`=="lightsteelblue1") %>% arrange(-FPKM)  %>% dplyr::select(Ensembl_ID,Gene_ID)
+genes<-readxl::read_xls("./data/elife-10518-supp2-v2.xls") %>% filter(`WGCNA module`=="lightsteelblue1") %>% arrange(-FPKM)  %>% dplyr::select(Ensembl_ID,Gene_ID)
 
 colnames(genes)<-c("ensembls", "genes")
 
 
 
-aln_stats_scn <- read.table("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/SCN_9rep/SCN_stats.csv", sep='\t', header=T) %>% tibble::as_tibble() %>% left_join(covariate, by=c("sample_id"="filename")) %>% mutate(sample=label) %>% dplyr::select(sample, key, value)
+aln_stats_scn <- read.table("./data/SCN_stats.csv", sep='\t', header=T) %>% tibble::as_tibble() %>% left_join(covariate, by=c("sample_id"="filename")) %>% mutate(sample=label) %>% dplyr::select(sample, key, value)
 
 scn_reads_all <- aln_stats_scn %>% filter(key=="Number of input reads") %>% mutate(mean.v=mean(value)) %>% mutate(norm_factor=mean.v/value)
 scn_reads_mu <- aln_stats_scn %>% filter(key=="Uniquely mapped reads number")  %>% mutate(mean.v=mean(value)) %>% mutate(norm_factor=mean.v/value)
 scn_reads_um <- aln_stats_scn %>% filter(key=="Number of unmapped reads")
 
+### read circRNA count data 
+
+circ_all_scn<-readRDS("data/circ_all_scn.rds")
 
 
-################### GO tmod, clusterprofiler
-
-TOP100 <- (readxl::read_xls("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/SCN/elife-10518-supp2-v2.xls") %>% filter(`WGCNA module`=="lightsteelblue1") %>% arrange(-FPKM) %>% head(100))$Gene_ID
-
-convertMouseGeneList(TOP100)
-
-tmod_dbs <- list(MSigDB=readRDS("data/msigdb_HS_v6.2.rds"))
-
-top100_for_tmod<-convertMouseGeneList(TOP100)
-
-all_genes <- mapIds(org.Mm.eg.db, unique(linear_all_scn$Geneid), keytype="ENSEMBL", column="SYMBOL", multiVals = "first") %>% as.vector()
-
-bg_for_tmod <- convertMouseGeneList(all_genes)
-
-
-tmod_dbs <- list(MSigDB=readRDS("msigdb_HS_v6.2.rds"))
-
-msigdb <- tmod_dbs$MSigDB
-
-
-go <- msigdb[ msigdb$MODULES$Category == "C5" ]
-tmodHGtest(top100_for_tmod, bg_for_tmod, mset=go)
-
-tmod_res<-tmodHGtest(top100_for_tmod, bg_for_tmod, mset=go)
-
-
-top100_go<-clusterProfiler::enrichGO(TOP100, keyType='SYMBOL', ont='BP', OrgDb='org.Mm.eg.db')
-
-
-
-############################################### SCN circs Figure1 
-
-
-circ_all_scn<-list()
-
-
-for (i in covariate$filename){
-#  print (i)
-  sample_lin<-paste("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/SCN_9rep/mapping/ciri/", i, ".all_mates/out/ciri.", i, ".all_mates.tsv", sep="")
-  if(file.exists(sample_lin)){
-  circ_all_scn[[i]] <- read.table(sample_lin, header=T, sep='\t', comment.char = "") %>% tbl_df() %>% mutate(sample_id=i) %>% left_join(covariate, by=c("sample_id"="filename")) %>% mutate(sample_id=label) %>% mutate(time=group) %>% dplyr::select(-group, -label) 
-
-  }else{
-    print (sample_lin)
-    }
-}
-
-circ_all_scn <- circ_all_scn %>%  bind_rows() 
-
-#COUNT CIRCS PER TIME POINT
+# Figure 1 A (circRNA count per time-point)
 
 circ_count_scn<-circ_all_scn %>% group_by(circRNA_ID, time) %>% count() %>% filter(n>1) %>% group_by(time) %>% count()
 circ_count_scn1 <- circ_count_scn %>% filter(time=="ZT2") %>% mutate(time="ZT2.1")
@@ -133,6 +68,8 @@ scn_Fig.A <- scn_Fig.A_data %>% ggline(x="time", y="count", add = c("mean_sd","j
 scn_Fig.A
 
 
+########### Figure 1 B (overall circRNA expression in the SCN)
+
 sumCDR1reads <- sum((circ_all_scn  %>% filter(circRNA_ID == "chrX:61183248|61186174") %>% dplyr::select(X.junction_reads))$X.junction_reads)
 
 
@@ -148,7 +85,7 @@ all_wo.cdr <- circ_all_scn %>% filter(circRNA_ID != "chrX:61183248|61186174") %>
 
 
 
-#scn_Fig.C <- all_w.cdr %>% bind_rows(all_wo.cdr) %>% left_join(scn_reads_all, by=c("sample_id"="sample"))  %>% mutate(read.count.norm=read.count * norm_factor) %>% tidyr::separate(sample_id, c("time","replicate")) %>% mutate(sample_id=paste(time, replicate, sep="_")) 
+######## Figure 1 C (circular reads per sample)
 
  all_w.cdr.1 <-all_w.cdr %>% bind_rows(all_wo.cdr) %>% left_join(scn_reads_all, by=c("sample_id"="sample"))  %>% mutate(read.count.norm=read.count * norm_factor) %>% tidyr::separate(sample_id, c("time","replicate")) %>% mutate(sample_id=paste(time, replicate, sep="_")) 
  all_w.cdr.2 <-all_w.cdr %>% bind_rows(all_wo.cdr) %>% left_join(scn_reads_all, by=c("sample_id"="sample"))  %>% mutate(read.count.norm=read.count * norm_factor) %>% tidyr::separate(sample_id, c("time","replicate")) %>% mutate(sample_id=paste(time, replicate, sep="_")) %>% subset(time=="ZT2") %>% mutate(time="ZT2.1")
@@ -159,7 +96,7 @@ all_wo.cdr <- circ_all_scn %>% filter(circRNA_ID != "chrX:61183248|61186174") %>
 scn_Fig.C <- scn_Fig.C_data %>% ggline(x="time", y="read.count.norm", add = c("mean_sd","jitter"), shape = 5, color="reads", palette = "jco", point.size = 3) + annotate("rect", xmin = 3.5, xmax = 6.5, ymin = -Inf, ymax = Inf, alpha=0.5) + scale_x_discrete(limits=c("ZT2", "ZT6", "ZT10", "ZT14", "ZT18", "ZT22", "ZT2.1")) + theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12))+ylab("norm. # of head-to-tail reads")+xlab("zeitgeber(time)") + ggtitle("Circular reads per sample")  + theme(legend.title = element_blank(), plot.title = element_text(size=15, face="bold", hjust = 0.5), legend.position = c(0.25,0.9), legend.text = element_text(size=10))  + ylim(0,1500)
 scn_Fig.C
 
-
+########## Figure 1 D (Cdr1as expression per time-point)
 
 cdr1.as <- circ_all_scn  %>% dplyr::select(circRNA_ID, X.junction_reads, sample_id) %>% spread(sample_id, X.junction_reads) %>% na_replace(0) %>% filter(circRNA_ID == "chrX:61183248|61186174") %>% gather(sample_id, X.junction_reads, ZT10_1:ZT6_9) %>% left_join(scn_reads_all, by=c("sample_id"="sample")) %>% mutate(HeadToTail_reads=X.junction_reads * norm_factor)  %>% tidyr::separate(sample_id, c("time","replicate")) %>% mutate(sample_id=paste(time, replicate, sep="_"))
 
@@ -171,42 +108,53 @@ cdr1.as_data <- bind_rows(cdr1.as, cdr1.as.1)
 scn_Fig.D <- cdr1.as_data %>% ggline(x="time", y="HeadToTail_reads", add = c("mean_sd", "jitter"), col="darkred", shape = 5, point.size=3) + annotate("rect", xmin = 3.5, xmax = 6.5, ymin = -Inf, ymax = Inf, alpha=0.5) + scale_x_discrete(limits=c("ZT2", "ZT6", "ZT10", "ZT14", "ZT18", "ZT22", "ZT2.1")) + theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12), plot.title = element_text(size=15, face="bold", hjust = 0.5))+ggtitle("Cdr1as expression")  +xlab("zeitgeber(time)")+ylab("norm. # of head-to-tail reads") #+stat_compare_means(comparisons = list(c("ZT14", "ZT10"), c("ZT14", "ZT18"), c("ZT2", "ZT6"), c("ZT6", "ZT10"), c("ZT18", "ZT22")), label = "p.signif", label.y = c(500,450, 350,100, 400))
 
 
-pdf("Fig1.pdf", height=8, width=10)
-plot_grid(plotlist = list( scn_Fig.A, scn_Fig.B, scn_Fig.C, scn_Fig.D), ncol = 2,labels = c('A', 'B', 'C','D'), label_size=15)
-dev.off()
+scn_Fig.D
 
 
-
-##################### Figure 2
-cortex<-readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/aam8526_Piwecka_SM_table_S4.xlsx", sheet=1, skip=8) %>% tbl_df()
-cereb<-readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/aam8526_Piwecka_SM_table_S4.xlsx", sheet=2) %>% tbl_df()
-ofl<-readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/aam8526_Piwecka_SM_table_S4.xlsx", sheet=3) %>% tbl_df()
-hippo<-readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/aam8526_Piwecka_SM_table_S4.xlsx", sheet=4) %>% tbl_df()
+##################### Figure 2 A and B
 
 
-cortex<-readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/aam8526_piwecka_sm_table_s3.xlsx", sheet=1, skip=8) %>% tbl_df()
-cereb<-readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/aam8526_piwecka_sm_table_s3.xlsx", sheet=2) %>% tbl_df()
-ofl<-readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/aam8526_piwecka_sm_table_s3.xlsx", sheet=3) %>% tbl_df()
-hippo<-readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/aam8526_piwecka_sm_table_s3.xlsx", sheet=4) %>% tbl_df()
+# read the tables from Piwecka et al., Sience 2017
+# Piwecka et al sequenced poltyA select and total RNA-Seq data of Cdr1as KO mice
+#The first (outcommented) block is the polyA data
+
+#cortex<-readxl::read_xlsx("./data/aam8526_Piwecka_SM_table_S4.xlsx", sheet=1, skip=8) %>% tbl_df()
+#cereb<-readxl::read_xlsx("./data/aam8526_Piwecka_SM_table_S4.xlsx", sheet=2) %>% tbl_df()
+#ofl<-readxl::read_xlsx("./data/aam8526_Piwecka_SM_table_S4.xlsx", sheet=3) %>% tbl_df()
+#hippo<-readxl::read_xlsx("./data/aam8526_Piwecka_SM_table_S4.xlsx", sheet=4) %>% tbl_df()
 
 
-genes_30min<-(readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=1) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Induced"))$gene
-genes_1h<-(readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=2) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Induced"))$gene
-genes_1h_r<-(readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=2) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Reduced"))$gene
-genes_3h<-(readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=3) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Induced"))$gene
-genes_3h_r<-(readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=3) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Reduced"))$gene
-genes_6h<-(readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=4) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Induced"))$gene
-genes_6h_r<-(readxl::read_xlsx("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=4) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Reduced"))$gene
+cortex<-readxl::read_xlsx("./data/aam8526_piwecka_sm_table_s3.xlsx", sheet=1, skip=8) %>% tbl_df()
+cereb<-readxl::read_xlsx("./data/aam8526_piwecka_sm_table_s3.xlsx", sheet=2) %>% tbl_df()
+ofl<-readxl::read_xlsx("./data/aam8526_piwecka_sm_table_s3.xlsx", sheet=3) %>% tbl_df()
+hippo<-readxl::read_xlsx("./data/aam8526_piwecka_sm_table_s3.xlsx", sheet=4) %>% tbl_df()
+
+# read tables from Xu et al., Neuron 2022
+
+genes_30min<-(readxl::read_xlsx("./data/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=1) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Induced"))$gene
+genes_1h<-(readxl::read_xlsx("./data/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=2) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Induced"))$gene
+genes_1h_r<-(readxl::read_xlsx("./data/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=2) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Reduced"))$gene
+genes_3h<-(readxl::read_xlsx("./data/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=3) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Induced"))$gene
+genes_3h_r<-(readxl::read_xlsx("./data/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=3) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Reduced"))$gene
+genes_6h<-(readxl::read_xlsx("./data/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=4) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Induced"))$gene
+genes_6h_r<-(readxl::read_xlsx("./data/1-s2.0-S0896627321005705-mmc2.xlsx", sheet=4) %>% tbl_df() %>% mutate(gene=`...1`)  %>% filter(Class=="Reduced"))$gene
 
 mods <- data.frame(ID=c("ID1", "ID2", "ID3", "ID4", "ID5", "ID6", "ID7"), Title=c("30 min induced", "1h induced", "1h reduced", "3h induced", "3h reduced", "6h induced", "6h reduced"))
 
 m2g<-list(ID1=genes_30min, ID2=genes_1h, ID3=genes_1h_r, ID4=genes_3h, ID5=genes_3h_r,  ID6=genes_6h, ID7=genes_6h_r)
 mymset <- makeTmod(mods, m2g)
 
-cortex <- cortex %>% mutate(color="grey") %>% mutate(color=ifelse((log2FoldChange < 0) , "darkblue", "darkred")) %>% as.data.frame()
-cereb <- cereb %>% mutate(color="grey") %>% mutate(color=ifelse((log2FoldChange < 0) , "darkblue", "darkred")) %>% as.data.frame()
-hippo <- hippo %>% mutate(color="grey") %>% mutate(color=ifelse((log2FoldChange < 0) , "darkblue", "darkred")) %>% as.data.frame() 
-ofl <- ofl %>% mutate(color="grey") %>% mutate(color=ifelse((log2FoldChange < 0) , "darkblue", "darkred")) %>% as.data.frame() 
+
+#cortex <- cortex %>% mutate(color="grey") %>% mutate(color=ifelse((log2FoldChange < 0) , "darkblue", "darkred")) %>% as.data.frame()
+#cereb <- cereb %>% mutate(color="grey") %>% mutate(color=ifelse((log2FoldChange < 0) , "darkblue", "darkred")) %>% as.data.frame()
+#hippo <- hippo %>% mutate(color="grey") %>% mutate(color=ifelse((log2FoldChange < 0) , "darkblue", "darkred")) %>% as.data.frame() 
+#ofl <- ofl %>% mutate(color="grey") %>% mutate(color=ifelse((log2FoldChange < 0) , "darkblue", "darkred")) %>% as.data.frame() 
+
+
+cortex <- cortex %>% mutate(color="grey")  %>% as.data.frame()
+cereb <- cereb %>% mutate(color="grey")  %>% as.data.frame()
+hippo <- hippo %>% mutate(color="grey")  %>% as.data.frame() 
+ofl <- ofl %>% mutate(color="grey")  %>% as.data.frame() 
 
 cortex$color[cortex$padj<0.05 & cortex$log2FoldChange < 0]= "blue"
 cortex$color[cortex$padj<0.05 & cortex$log2FoldChange > 0]= "red"
@@ -223,50 +171,44 @@ cereb$color[cereb$padj<0.05 & cereb$log2FoldChange > 0]= "red"
 ofl$color[ofl$padj<0.05 & ofl$log2FoldChange < 0]= "blue"
 ofl$color[ofl$padj<0.05 & ofl$log2FoldChange > 0]= "red"
 
+############ Figure 2 A
 
-pdf("fig2_upper.pdf", height=5, width=10)
-par(mfrow=c(1,2))
 tmod::evidencePlot(cortex$symbol, mset=mymset, m="ID1", gene.labels=T, gene.colors=cortex$color,  main="Xu et al., Neuron 2021 \ninduced 30min after light exposure", gl.cex=0.8)
-tmod::evidencePlot(ofl$symbol, mset=mymset, m="ID1", gene.labels=T, gene.colors=ofl$color,  main="Xu et al., Neuron 2021 \ninduced 30min after light exposure", gl.cex=0.8)
 
-dev.off()
+########### Figure 2 B
+
+tmod::evidencePlot(ofl$symbol, mset=mymset, m="ID1", gene.labels=T, gene.colors=ofl$color,  main="Xu et al., Neuron 2021 \ninduced 30min after light exposure", gl.cex=0.8)
 
 
 ################## supplementary Xu et al., light induced
 
 
-pdf("fig2_suppl-upper.pdf", height=5, width=10)
-par(mfrow=c(1,2))
-
-#tmod::evidencePlot(ofl$symbol, mset=mymset, m="ID2", gene.labels=T, gene.colors=ofl$color,  main="1 hour after light exposure", gl.cex=0.8)
-#tmod::evidencePlot(cortex$symbol, mset=mymset, m="ID2", gene.labels=T, gene.colors=cortex$color,  main="1 hour after light exposure", gl.cex=0.8)
-
 tmod::evidencePlot(hippo$symbol, mset=mymset, m="ID1", gene.labels=T, gene.colors=hippo$color,  main="30min after light exposure", gl.cex=0.8)
 tmod::evidencePlot(cereb$symbol, mset=mymset, m="ID1", gene.labels=T, gene.colors=cereb$color,  main="30min after light exposure", gl.cex=0.8)
 
 
-#tmod::evidencePlot(hippo$symbol, mset=mymset, m="ID2", gene.labels=T, gene.colors=cortex$color,  main="1 hour after light exposure", gl.cex=0.8)
-#tmod::evidencePlot(cereb$symbol, mset=mymset, m="ID2", gene.labels=T, gene.colors=cortex$color,  main="1 hour after light exposure", gl.cex=0.8)
-
-dev.off()
 
 
-
-
-###########fig2 the rest
-
-
-
+####### Supplementary Figure 1A
 
 cdr1_lin<-linear_all_scn %>% filter(Geneid=="ENSMUSG00000090546") %>% left_join(scn_reads_all, by=c("sample_id"="sample")) %>% mutate(norm_counts=counts*norm_factor) %>% ggline(x="time", y="norm_counts", add = c("mean_sd","jitter"), shape = 5, palette = "jco", point.size = 3, color="darkred")+ggtitle("Cdr1 linear read counts")+ylab("normalized counts")+ annotate("rect", xmin = 3.5, xmax = Inf, ymin = -Inf, ymax = Inf, alpha=0.5)+ylim(0,7500)
+
+cdr1_lin
+
+####### Supplementary Figure 1B
 
 
 cyrano_lin<- linear_all_scn %>% filter(Geneid=="ENSMUSG00000085438") %>% left_join(scn_reads_all, by=c("sample_id"="sample")) %>% mutate(norm_counts=counts*norm_factor) %>% ggline(x="time", y="norm_counts", add = c("mean_sd","jitter"), shape = 5, palette = "jco", point.size = 3, color="darkred")+ggtitle("Cyrano read counts")+ylab("normalized counts")+ annotate("rect", xmin = 3.5, xmax = Inf, ymin = -Inf, ymax = Inf, alpha=0.5)+ylim(0,2500)
 
+cyrano_lin
+
+###### Figure 1 F
 
 twin_histplot<-linear_all_scn %>% left_join(scn_reads_mu, by=c("sample_id"="sample")) %>% mutate(fpkm=counts*10^9/value) %>% mutate(fpkm=fpkm/Length)  %>% right_join(twin, by=c("Geneid"="Ensembl_ID"))  %>% group_by(Geneid) %>% summarize(mean.fpkm=mean(fpkm)) %>% arrange(-mean.fpkm) %>%ggplot(aes(x=log2(mean.fpkm+1))) + geom_histogram(color="black", fill="white")+  theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12))+ylab("# of genes")+ggtitle("Expression of the twin-peak genes")+  geom_vline(xintercept=3.57)+ geom_vline(xintercept=6.41)
 
+twin_histplot
 
+######  Figure 2 C
 
 top50 <-linear_all_scn %>% left_join(scn_reads_mu, by=c("sample_id"="sample")) %>% mutate(fpkm=counts*10^9/value) %>% mutate(fpkm=fpkm/Length)  %>% right_join(twin, by=c("Geneid"="Ensembl_ID"))  %>% group_by(Geneid) %>% summarize(mean.fpkm=mean(fpkm)) %>% arrange(-mean.fpkm) %>% head(50)
 
@@ -288,70 +230,46 @@ total_plot_data<- bind_rows(total_plot_data.1, total_plot_data.2)
 
 total_plot <- total_plot_data %>% ggline(x="time", y="relative_expr", group="genes", palette = "jco", point.size = 0.2, color="darkred") + scale_x_discrete(limits=c("ZT2", "ZT6", "ZT10", "ZT14", "ZT18", "ZT22", "ZT2.1")) + theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12), plot.title = element_text(size=15, face="bold", hjust = 0.5)) + annotate("rect", xmin = 3.5, xmax = 6.5, ymin = -Inf, ymax = Inf, alpha=0.5)+ggtitle("Pemborke et al., 2015")  +ylim(-3,3)
 
+total_plot
 
-plot_empty <- plot(0, xaxt = 'n', yaxt = 'n', bty = 'n', pch = '', ylab = '', xlab = '')
-
-
-
+#plot_empty <- plot(0, xaxt = 'n', yaxt = 'n', bty = 'n', pch = '', ylab = '', xlab = '')
 
 
+
+######## Figure 2 D
+
+##### load the dark-dark SCN RNA-Seq data from Cheng et al., study
 
 samples<-c("CT0_3xSCN_WT1","CT0_3xSCN_WT2","CT0_3xSCN_WT3","CT0_3xSCN_WT4","CT0_3xSCN_WT5","CT6_3xSCN_WT1","CT6_3xSCN_WT2","CT6_3xSCN_WT3","CT6_3xSCN_WT4","CT6_3xSCN_WT5", "CT12_3xSCN_WT1","CT12_3xSCN_WT2","CT12_3xSCN_WT3","CT12_3xSCN_WT4","CT12_3xSCN_WT5","CT18_3xSCN_WT1","CT18_3xSCN_WT2","CT18_3xSCN_WT3","CT18_3xSCN_WT4","CT18_3xSCN_WT5")
 
 
-linear_all_scn_pa<-list()
+
+linear_all_scn_pa<-readRDS("./data/linear_all_scn_pa.rds")
 
 
-for (i in samples){
-#  print (i)
-  sample_lin<-paste("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/SCN_polyA/results_2021_05_09/mapping/feature_counts/", i, ".all_mates/out/feature_counts.", i, ".all_mates.feature_counts", sep="")
-  if(file.exists(sample_lin)){
-  linear_all_scn_pa[[i]] <- read.table(sample_lin, skip=1, header=T, sep='\t', comment.char = "") %>% tbl_df() %>% mutate(sample_id=i) %>% tidyr::separate(sample_id, into=c("time", "protocol","replicate"), sep="_") %>% mutate(sample_id=paste(time, protocol, replicate, sep="_")) %>%  dplyr::select(1,7,8,9,10,11)
- colnames(linear_all_scn_pa[[i]])[2]<-"counts" 
-  }else{
-    print (sample_lin)
-    }
-}
 
-aln_stats_scn_pa <- read.csv("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/SCN_polyA/results_2021_05_09/SCN_stats.tsv", header=T)
+aln_stats_scn_pa <- read.csv("./data/SCN_stats_pa.csv", header=T)
 
 scn_reads_all_pa <- aln_stats_scn_pa %>% filter(key=="Number of input reads")%>% mutate(mean.v=mean(value)) %>% mutate(norm_factor=mean.v/value)
 scn_reads_mu_pa <- aln_stats_scn_pa %>% filter(key=="Uniquely mapped reads number")
 
-linear_all_scn_pa <- linear_all_scn_pa %>%  bind_rows() 
 
 
 tmp.mean_pa <-linear_all_scn_pa %>% filter(Geneid %in% top50$Geneid) %>% left_join(genes, by=c("Geneid"="ensembls")) %>% left_join(scn_reads_all_pa, by=c("sample_id")) %>% mutate(norm_counts = counts * norm_factor) %>% group_by(genes) %>% summarize(tmp.mean = mean(norm_counts)) %>% ungroup()
-
-
-
 
 
 polyA_plot.data_1 <- linear_all_scn_pa %>% filter(Geneid %in% top50$Geneid) %>% left_join(genes, by=c("Geneid"="ensembls")) %>% left_join(scn_reads_all_pa, by=c("sample_id")) %>% mutate(norm_counts = counts * norm_factor) %>% group_by(genes, time) %>% summarize(group.mean=mean(norm_counts)) %>% left_join(tmp.mean_pa) %>% mutate(relative_expr = log2(group.mean/tmp.mean))
 
 polyA_plot.data_2 <- polyA_plot.data_1 %>% subset(time=="CT0") %>% mutate(time="CT0.1")
 
-
 polyA_plot.data <- bind_rows(polyA_plot.data_1, polyA_plot.data_2)
-
 
 polyA_plot <- polyA_plot.data %>% ggline(x="time", y="relative_expr", group="genes", palette = "jco", point.size = 0.2, color="darkred")  + theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12), plot.title = element_text(size=15, face="bold", hjust = 0.5))+ annotate("rect", xmin = 0, xmax = Inf, ymin = -Inf, ymax = Inf, alpha=0.5)+ggtitle("Cheng et al., 2019") + scale_x_discrete(limits=c("CT0", "CT6","CT12","CT18","CT0.1")) +ylim(-3,3)
 
 
 
-pdf("Fig2_logscale.pdf", height=10, width=10)
 
-
-cowplot::plot_grid(fig2a, twin_histplot, total_plot, polyA_plot,   ncol=2, labels=c("A","B", "C", "D"))
-dev.off()
-
-pdf("Fig2_lower.pdf", height=5, width=10)
-
-cowplot::plot_grid(total_plot, polyA_plot,   ncol=2, labels=c("C", "D"))
-
-
-###################### Supplementary more than 50 
-
+###################### Supplementary Figure 2 
 
 
 
@@ -361,44 +279,25 @@ tmp.mean_pa_100 <-linear_all_scn_pa %>% filter(Geneid %in% top100$Geneid) %>% le
 tmp.mean_pa_200 <-linear_all_scn_pa %>% filter(Geneid %in% top200$Geneid) %>% left_join(genes, by=c("Geneid"="ensembls")) %>% left_join(scn_reads_all_pa, by=c("sample_id")) %>% mutate(norm_counts = counts * norm_factor) %>% group_by(genes) %>% summarize(tmp.mean = mean(norm_counts)) %>% ungroup()
 
 
-
-
-
 polyA_plot.data100_1 <- linear_all_scn_pa %>% filter(Geneid %in% top100$Geneid) %>% left_join(genes, by=c("Geneid"="ensembls")) %>% left_join(scn_reads_all_pa, by=c("sample_id")) %>% mutate(norm_counts = counts * norm_factor) %>% group_by(genes, time) %>% summarize(group.mean=mean(norm_counts)) %>% left_join(tmp.mean_pa_100) %>% mutate(relative_expr = log2(group.mean/tmp.mean))
 
 polyA_plot.data100_2 <- polyA_plot.data100_1 %>% subset(time=="CT0") %>% mutate(time="CT0.1")
 
-
 polyA_plot.data100 <- bind_rows(polyA_plot.data100_1, polyA_plot.data100_2)
 
-
 polyA_plot100 <- polyA_plot.data100 %>% ggline(x="time", y="relative_expr", group="genes", palette = "jco", point.size = 0.2, color="darkred")  + theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12), plot.title = element_text(size=15, face="bold", hjust = 0.5))+ annotate("rect", xmin = 0, xmax = Inf, ymin = -Inf, ymax = Inf, alpha=0.5)+ggtitle("Cheng et al., 2019") + scale_x_discrete(limits=c("CT0", "CT6","CT12","CT18","CT0.1")) +ylim(-3,3)
-
-
 
 polyA_plot.data200_1 <- linear_all_scn_pa %>% filter(Geneid %in% top200$Geneid) %>% left_join(genes, by=c("Geneid"="ensembls")) %>% left_join(scn_reads_all_pa, by=c("sample_id")) %>% mutate(norm_counts = counts * norm_factor) %>% group_by(genes, time) %>% summarize(group.mean=mean(norm_counts)) %>% left_join(tmp.mean_pa_200) %>% mutate(relative_expr = log2(group.mean/tmp.mean))
 
 polyA_plot.data200_2 <- polyA_plot.data200_1 %>% subset(time=="CT0") %>% mutate(time="CT0.1")
 
-
 polyA_plot.data200 <- bind_rows(polyA_plot.data200_1, polyA_plot.data200_2)
-
 
 polyA_plot200 <- polyA_plot.data200 %>% ggline(x="time", y="relative_expr", group="genes", palette = "jco", point.size = 0.2, color="darkred")  + theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12), plot.title = element_text(size=15, face="bold", hjust = 0.5))+ annotate("rect", xmin = 0, xmax = Inf, ymin = -Inf, ymax = Inf, alpha=0.5)+ggtitle("Cheng et al., 2019") + scale_x_discrete(limits=c("CT0", "CT6","CT12","CT18","CT0.1")) +ylim(-3,3)
 
-
-
-
-
-
-
 tmp.mean_100<-linear_all_scn %>% filter(Geneid %in% top100$Geneid) %>% left_join(genes, by=c("Geneid"="ensembls")) %>% left_join(scn_reads_all, by=c("sample_id"="sample")) %>% mutate(norm_counts = counts * norm_factor) %>% group_by(genes) %>% summarize(tmp.mean = mean(norm_counts)) %>% ungroup()
 
-
-
-
 tmp.mean_200<-linear_all_scn %>% filter(Geneid %in% top200$Geneid) %>% left_join(genes, by=c("Geneid"="ensembls")) %>% left_join(scn_reads_all, by=c("sample_id"="sample")) %>% mutate(norm_counts = counts * norm_factor) %>% group_by(genes) %>% summarize(tmp.mean = mean(norm_counts)) %>% ungroup()
-
 
 total_plot_data100.1 <- linear_all_scn %>% filter(Geneid %in% top100$Geneid) %>% left_join(genes, by=c("Geneid"="ensembls")) %>% left_join(scn_reads_all, by=c("sample_id"="sample")) %>% mutate(norm_counts = counts * norm_factor) %>%  group_by(genes, time) %>% summarize(group.mean=mean(norm_counts)) %>% left_join(tmp.mean_100)  %>% mutate(relative_expr = log2(group.mean/tmp.mean)) 
 
@@ -408,8 +307,6 @@ total_plot_data100<- bind_rows(total_plot_data100.1, total_plot_data100.2)
 
 total_plot100 <- total_plot_data100 %>% ggline(x="time", y="relative_expr", group="genes", palette = "jco", point.size = 0.2, color="darkred") + scale_x_discrete(limits=c("ZT2", "ZT6", "ZT10", "ZT14", "ZT18", "ZT22", "ZT2.1")) + theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12), plot.title = element_text(size=15, face="bold", hjust = 0.5)) + annotate("rect", xmin = 3.5, xmax = 6.5, ymin = -Inf, ymax = Inf, alpha=0.5)+ggtitle("Pemborke et al., 2015")  +ylim(-3,3)
 
-
-
 total_plot_data200.1 <- linear_all_scn %>% filter(Geneid %in% top200$Geneid) %>% left_join(genes, by=c("Geneid"="ensembls")) %>% left_join(scn_reads_all, by=c("sample_id"="sample")) %>% mutate(norm_counts = counts * norm_factor) %>%  group_by(genes, time) %>% summarize(group.mean=mean(norm_counts)) %>% left_join(tmp.mean_200)  %>% mutate(relative_expr = log2(group.mean/tmp.mean)) 
 
 total_plot_data200.2 <- total_plot_data200.1 %>% subset(time=="ZT2") %>% mutate(time="ZT2.1")
@@ -418,21 +315,17 @@ total_plot_data200<- bind_rows(total_plot_data200.1, total_plot_data200.2)
 
 total_plot200 <- total_plot_data200 %>% ggline(x="time", y="relative_expr", group="genes", palette = "jco", point.size = 0.2, color="darkred") + scale_x_discrete(limits=c("ZT2", "ZT6", "ZT10", "ZT14", "ZT18", "ZT22", "ZT2.1")) + theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12), plot.title = element_text(size=15, face="bold", hjust = 0.5)) + annotate("rect", xmin = 3.5, xmax = 6.5, ymin = -Inf, ymax = Inf, alpha=0.5)+ggtitle("Pemborke et al., 2015")  +ylim(-3,3)
 
-pdf("suppl_top100_200.pdf")
 
-cowplot::plot_grid(total_plot100, total_plot200, polyA_plot100, polyA_plot200)
+total_plot100 
 
+total_plot200 
 
-dev.off()
+polyA_plot100 
 
-
-
-###################### Suppl Fig Cdr1 and Cyrano
+polyA_plot200
 
 
-
-pdf("Cdr1_linear_cyrano.pdf", height=4, width=8)
-
+############  Supplementary Figure 1  (Cdr1 and Cyrano)
 
 
 cdr1_lin<-linear_all_scn %>% filter(Geneid=="ENSMUSG00000090546") %>% left_join(scn_reads_all, by=c("sample_id"="sample")) %>% mutate(norm_counts=counts*norm_factor)
@@ -453,194 +346,70 @@ cyrano_lin.data<- bind_rows(cyrano_lin, cyrano_lin.2)
 cyrano_lin<-cyrano_lin.data %>% ggline(x="time", y="norm_counts", add = c("mean_sd","jitter"), shape = 5, palette = "jco", point.size = 3, color="darkred")+ggtitle("Cyrano read counts")+ylab("normalized counts")+ annotate("rect", xmin = 3.5, xmax = 6.5, ymin = -Inf, ymax = Inf, alpha=0.5)+ylim(0,2500)+ scale_x_discrete(limits=c("ZT2", "ZT6", "ZT10", "ZT14", "ZT18", "ZT22","ZT2.1")) 
 
 cowplot::plot_grid(cdr1_lin, cyrano_lin, ncol=2, labels=c("A", "B"))
-dev.off()
 
 
-
-###################### Suppl fig stress response
-
-light_genes<-c("Dusp1","Fos","Egr1","Jun")
-light_ens<-c("ENSMUSG00000024190","ENSMUSG00000021250","ENSMUSG00000038418","ENSMUSG00000052684")
-
-light<-bind_cols(light_genes, light_ens)
-colnames(light)<-c("gene","ensembl")
-
-light_tmp.mean<- linear_all_scn %>% filter(Geneid %in% light$ensembl) %>% left_join(scn_reads_all, by=c("sample_id"="sample")) %>% mutate(norm_counts=counts*norm_factor) %>% left_join(light, by=c("Geneid"="ensembl")) %>% group_by(gene) %>% summarize(mean.expr=mean(norm_counts))
+######### Figure 3 A (Cortex, exonic and intronic rates)
 
 
-
-light.1<- linear_all_scn %>% filter(Geneid %in% light$ensembl) %>% left_join(scn_reads_all, by=c("sample_id"="sample")) %>%  left_join(light, by=c("Geneid"="ensembl"))  %>% mutate(norm_counts=counts*norm_factor) %>% group_by(gene, time) %>% summarize(norm_counts.mean=mean(norm_counts)) %>% left_join(light_tmp.mean) %>% mutate(tmp.expr=log2(norm_counts.mean/mean.expr))
-
-
-light.2<- filter(light.1, time=="ZT2") %>% mutate(time="ZT2.1")
-
-
-light_data <-bind_rows(light.1,light.2)
-
-pdf("Suppl.light.pdf")
-
-light_data %>% ggline(x="time", y="tmp.expr", add = c("mean_sd","jitter"), shape = 5, palette = "jco", point.size = 3, color="gene")+ggtitle("Early response genes")+ylab("normalized counts")+ annotate("rect", xmin = 3.5, xmax = 6.5, ymin = -Inf, ymax = Inf, alpha=0.5)+ylim(-2,2)+ scale_x_discrete(limits=c("ZT2", "ZT6", "ZT10", "ZT14", "ZT18", "ZT22","ZT2.1")) + ylab("rel. expression")
-
-dev.off()
-
-
-
-########################## Figure 3
-
-
-
-
-samples<-c("F3_1", "F7_1","F11_1","F15_1","F19_1","F23_1", "F3_2", "F7_2","F11_2","F15_2","F19_2","F23_2", "F3_3", "F7_3","F11_3","F15_3","F19_3","F23_3")
-
-
-rates<-list()
-
-for (i in samples){
-
-
-file=paste("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/results_2020_05_22/mapping/rna_seqc/", i, ".all_mates/out/star.", i, ".all_mates.bam.metrics.tsv", sep="")
-#file=paste("rna_seqc/", i, ".all_mates/out/star.", i, ".all_mates.bam.metrics.tsv", sep="")
-
-rates[[i]]<-read.table(file, quote="", header=T, sep='\t') %>% tbl_df() %>% filter(Sample=="Exonic Rate" | Sample=="Intronic Rate" | Sample=="Intergenic Rate") %>% mutate(ID=i)
-colnames(rates[[i]])=c("anno", "rate", "sample")
-
-}
-
-
-f<-bind_rows(rates) %>% tidyr::separate(sample, c("time","rep"), sep="_") %>% mutate(sample=paste(time, rep, sep="_"))
-
-#ggplot(f, aes(x=sample, y=rate, fill=anno))+geom_bar(stat="identity")
-
-
-#pdf("exon_intron_c.pdf")
+f<-readRDS("data/frontal_cortex_exonic_intronic_rates.RDS")
 
 f.1 <- f %>% filter(time=="F7") %>% mutate(time="F7.1")
-
 
 f<- bind_rows(f,f.1)
 
 f_ie<-f %>% ggline(x="time", y="rate", add = c("mean_sd","jitter"), shape = 5, color="anno", palette = "jco", point.size = 3) + annotate("rect", xmin = 3.75, xmax = 6.75, ymin = -Inf, ymax = Inf, alpha=0.5) + scale_x_discrete(limits=c("F7" ,"F11", "F15", "F19", "F23", "F3", "F7.1")) + theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12))+ylab("rate of reads")+xlab("time") + ggtitle("Cortex") + theme(legend.title = element_blank(), plot.title = element_text(size=15, face="bold", hjust = 0.5), legend.position = c(0.25,0.6), legend.text = element_text(size=10)) 
-#f_ie
-#dev.off()
+
+f_ie
+
+######### Figure 3 A (Hippocampus, exonic and intronic rates)
 
 
-#samples<-c("H3_1", "H7_1","H11_1","H15_1","H19_1","H23_1", "H3_2", "H7_2","H11_2","H15_2","H19_2","H23_2", "H3_3", "H7_3d","H11_3","H15_3","H19_3","H23_3")
-samples<-c("H3_1", "H7_1","H11_1","H15_1","H19_1","H23_1", "H3_2", "H7_2","H11_2","H15_2","H19_2","H23_2", "H3_3", "H7_3","H11_3","H15_3","H19_3","H23_3")
-
-
-rates<-list()
-
-for (i in samples){
-
-
-file=paste("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/results_2020_05_22/mapping/rna_seqc/", i, ".all_mates/out/star.", i, ".all_mates.bam.metrics.tsv", sep="")
-#file=paste("rna_seqc/", i, ".all_mates/out/star.", i, ".all_mates.bam.metrics.tsv", sep="")
-
-rates[[i]]<-read.table(file, quote="", header=T, sep='\t') %>% tbl_df() %>% filter(Sample=="Exonic Rate" | Sample=="Intronic Rate" | Sample=="Intergenic Rate") %>% mutate(ID=i)
-colnames(rates[[i]])=c("anno", "rate", "sample")
-
-}
-
-
-h<-bind_rows(rates) %>% tidyr::separate(sample, c("time","rep"), sep="_") %>% mutate(sample=paste(time, rep, sep="_"))
-
-#ggplot(h, aes(x=sample, y=rate, fill=anno))+geom_bar(stat="identity")
+h<-readRDS("data/hippocampus_exonic_intronic_rates.RDS")
 
 h.1 <- h %>% filter(time=="H7") %>% mutate(time="H7.1")
 
-
 h <- bind_rows(h,h.1)
 
-
-#pdf("exon_intron_h.pdf")
-
 h_ie<-h %>% ggline(x="time", y="rate", add = c("mean_sd","jitter"), shape = 5, color="anno", palette = "jco", point.size = 3) + annotate("rect", xmin = 3.75, xmax = 6.75, ymin = -Inf, ymax = Inf, alpha=0.5) + scale_x_discrete(limits=c("H7", "H11", "H15", "H19", "H23", "H3", "H7.1")) + theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12))+ylab("rate of reads")+xlab("time") + ggtitle("Hippocampus") + theme(legend.title = element_blank(), plot.title = element_text(size=15, face="bold", hjust = 0.5), legend.position = c(0.25,0.6), legend.text = element_text(size=10)) 
-#h_ie
-
-#dev.off()
 
 
+######## Figure 3 B and C 
 
-
-samples<-read.table("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/circs_sge/samples.txt", header = F)$V1
-#samples_hippo<-grep("^H", samples, value=T) 
-#samples_cortex<-grep("^F", samples, value=T) 
+######## Overlap with circbase circRNAs
 
 samples_hippo <- c("H3_1", "H7_1","H11_1","H15_1","H19_1","H23_1", "H3_2", "H7_2","H11_2","H15_2","H19_2","H23_2", "H3_3", "H7_3","H11_3","H15_3","H19_3","H23_3")
 samples_cortex<- c("F3_1", "F7_1","F11_1","F15_1","F19_1","F23_1", "F3_2", "F7_2","F11_2","F15_2","F19_2","F23_2", "F3_3", "F7_3","F11_3","F15_3","F19_3","F23_3")
 
-#samples_microglia <- grep("^P|C", samples, value=T) 
 
+circ_all_hippo <- readRDS("./data/hipppocampus_circ_counts.rds")
 
-circ_all_hippo<-list()
-
-#for (i in samples_hippo){
-#  sample_circs<-paste("cluster_projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/circs_sge/ciri/data/", i, "/", i, ".tsv", sep="")
-#  circ_all_hippo[[i]] <- read.table(sample_circs, header=T, sep='\t', comment.char = "") %>% tbl_df() %>% mutate(sample_id=i) %>% mutate(time=gsub("\\_.*","",i))
-#}
-for (i in samples_hippo){
-  sample_circs<-paste("~/cluster_projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/results_2021_05_18/mapping/ciri/", i, ".all_mates/out/ciri.", i, ".all_mates.tsv", sep="")
-  circ_all_hippo[[i]] <- read.table(sample_circs, header=T, sep='\t', comment.char = "") %>% tbl_df() %>% mutate(sample_id=i) %>% mutate(time=gsub("\\_.*","",i))
-}
-
-
-circ_all_hippo <- circ_all_hippo %>% bind_rows()
-#readr::write_rds(circ_all_hippo, "circ_all_hippo.rds")
-#circ_all_hippo<-readRDS("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/circs_sge/circ_all_hippo.rds")
-
-
-#rc<-read.table("hippo_total_reads")
-rc<-read.table("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/circs_sge/hippo_mapped")
+rc<-read.table("./data/hippo_mapped_stats.tsv")
 
 colnames(rc)<-c("sample_id", "read_count")
-
-#rc <- rc%>% filter(sample_id != "H7_3")
 
 avgLibSize<-mean(rc$read_count)
 rc$read_count_norm = avgLibSize/rc$read_count
 rc <-tbl_df(rc)
 
-
-
-
 hippo_reproducible_circs <- circ_all_hippo %>% dplyr::select(circRNA_ID, time) %>% group_by(circRNA_ID, time) %>% count() %>% filter(n>1)
 hippo_reproducible_circs <- hippo_reproducible_circs$circRNA_ID %>% unique()
 circ_all_hippo_repr <- circ_all_hippo %>% filter(circRNA_ID %in% hippo_reproducible_circs)
 
- circbase_hippo <- read.table("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/circs_sge/circbase_hippo_mm10.bed") %>% tbl_df() %>% dplyr::select(V1:V4, V10, V6)
+circbase_hippo <- read.table("./data/circbase_hippo_mm10.bed") %>% tbl_df() %>% dplyr::select(V1:V4, V10, V6)
 
 colnames(circbase_hippo) <- c("chr", "start", "end", "id", "read_count", "strand")
 circbase_hippo <- circbase_hippo %>% mutate(circRNA_ID=paste(chr,":",start+1, "|", end, sep=""))
 
+circ_all_cortex <- readRDS("./data/cortex_circ_counts.rds")
 
-
-
-circ_all_cortex<-list()
-
-for (i in samples_cortex){
-  sample_circs<-paste("~/cluster_projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/results_2021_05_18/mapping/ciri/", i, ".all_mates/out/ciri.", i, ".all_mates.tsv", sep="")
-  circ_all_cortex[[i]] <- read.table(sample_circs, header=T, sep='\t', comment.char = "") %>% tbl_df() %>% mutate(sample_id=i) %>% mutate(time=gsub("\\_.*","",i))
-  
-}
-circ_all_cortex <- circ_all_cortex %>% bind_rows()
-
-#readr::write_rds(circ_all_cortex, "circ_all_cortex.rds")
-
-
-#circ_all_cortex<-readRDS("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/circs_sge/circ_all_cortex.rds")
-
-
-rc_cortex<-read.table("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/circs_sge/cortex_total_reads")
-rc_cortex<-read.table("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/circs_sge/cortex_mapped")
-
+#rc_cortex<-read.table("~/projects/2020-05-22_XXXXXXXXXXXXXXX/circs_sge/cortex_total_reads")
+rc_cortex<-read.table("./data/cortex_mapped_stats.tsv")
 
 colnames(rc_cortex)<-c("sample_id", "read_count")
-
 
 avgLibSize_cortex<-mean(rc_cortex$read_count)
 
 rc_cortex$read_count_norm = avgLibSize_cortex/rc_cortex$read_count
-
 rc_cortex <-tbl_df(rc_cortex)
 
 
@@ -649,11 +418,10 @@ cortex_reproducible_circs <- circ_all_cortex %>% dplyr::select(circRNA_ID, time)
 cortex_reproducible_circs <- cortex_reproducible_circs$circRNA_ID %>% unique()
 circ_all_cortex_repr <- circ_all_cortex %>% filter(circRNA_ID %in% cortex_reproducible_circs)
 
- circbase_cortex <- read.table("~/projects/2020-05-22_Andranik_Ivanov_Microglia_Analysis/circs_sge/circbase_cortex_mm10.bed") %>% tbl_df() %>% dplyr::select(V1:V4, V10, V6)
+circbase_cortex <- read.table("./data/circbase_cortex_mm10.bed") %>% tbl_df() %>% dplyr::select(V1:V4, V10, V6)
 
 colnames(circbase_cortex) <- c("chr", "start", "end", "id", "read_count", "strand")
 circbase_cortex <- circbase_cortex %>% mutate(circRNA_ID=paste(chr,":",start+1, "|", end, sep=""))
-
 
 
 
@@ -680,14 +448,10 @@ plot.cortex_cdr1 <- plot.cortex_cdr1.data %>% ggline(x="time", y="htt_reads", ad
   theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12))+ylab("norm. # of head-to-tail reads")+xlab("time of the day") + ggtitle("Cdr1as in cortex")  +
   theme(legend.title = element_blank(), plot.title = element_text(size=15, face="bold", hjust = 0.5), legend.position = c(0.25,0.9), legend.text = element_text(size=10))  
 
-#circ_all_cortex %>% group_by(sample_id) %>% count() %>% mutate(time=gsub("\\_.*","",sample_id))%>% left_join(rc_cortex)  %>% mutate(n_norm=n * read_count_norm) %>% ggplot(aes(x=sample_id, y=n_norm, fill=time)) +
-#  geom_bar(stat="identity", color="black")+ theme_minimal() + ggtitle("number of detected circRNAs per sample")+ylab("normalized number of circs")
-
 
 circ_cortex_expr<-circ_all_cortex %>% dplyr::select(circRNA_ID, X.junction_reads, sample_id) %>% tidyr::spread(sample_id, X.junction_reads) %>% 
   imputeTS::na_replace(0) %>% tidyr::gather( sample_id, counts,  F11_1:F7_3) %>% left_join(rc_cortex) %>% mutate(norm.read_count=counts*read_count_norm) %>% mutate(time=gsub("\\_.*","",sample_id)) %>% 
   group_by(circRNA_ID, time) %>% summarize(norm.read_count = mean(norm.read_count)) %>% tidyr::spread(time, norm.read_count) %>% filter(grepl("chr", circRNA_ID))
-
 
   
  plot.hippo_circular_reads.1 <- circ_all_hippo %>% group_by(sample_id) %>% summarize(AllHeadToTailReads=sum(X.junction_reads)) %>% 
@@ -713,15 +477,6 @@ plot.hippo_cdr1<- plot.hippo_cdr1.data %>%  ggpubr::ggline(x="time", y="htt_read
   theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12))+ylab("norm. # of head-to-tail reads")+xlab("time of the day") + ggtitle("Cdr1as in hippocampus")  +
   theme(legend.title = element_blank(), plot.title = element_text(size=15, face="bold", hjust = 0.5), legend.position = c(0.25,0.9), legend.text = element_text(size=10))
 
-#  circ_all_hippo %>% group_by(sample_id) %>% count() %>% mutate(time=gsub("\\_.*","",sample_id))%>% 
-#  left_join(rc)  %>% mutate(n_norm=n * avgLibSize/read_count) %>% 
-#  ggplot(aes(x=sample_id, y=n_norm, fill=time)) +
-#  geom_bar(stat="identity", color="black")+ theme_minimal() + ggtitle ("number of detected circRNAs per sample")
-
-
-#circ_hippo_expr<-circ_all_hippo %>% dplyr::select(circRNA_ID, X.junction_reads, sample_id) %>% tidyr::spread(sample_id, X.junction_reads) %>% 
-#  imputeTS::na_replace(0) %>% tidyr::gather( sample_id, counts,  H11_1:H7_2) %>% left_join(rc) %>% mutate(norm.read_count=counts*read_count_norm) %>% mutate(time=gsub("\\_.*","",sample_id)) %>% 
-#  group_by(circRNA_ID, time) %>% summarize(norm.read_count = mean(norm.read_count)) %>% tidyr::spread(time, norm.read_count) %>% filter(grepl("chr", circRNA_ID))
   
 circ_hippo_expr<-circ_all_hippo %>% dplyr::select(circRNA_ID, X.junction_reads, sample_id) %>% tidyr::spread(sample_id, X.junction_reads) %>% 
   imputeTS::na_replace(0) %>% tidyr::gather( sample_id, counts,  H11_1:H7_3) %>% left_join(rc) %>% mutate(norm.read_count=counts*read_count_norm) %>% mutate(time=gsub("\\_.*","",sample_id)) %>% 
@@ -729,11 +484,12 @@ circ_hippo_expr<-circ_all_hippo %>% dplyr::select(circRNA_ID, X.junction_reads, 
   
 
   
-  pdf("Fig3.pdf", height=9, width=8)
   
-  cowplot::plot_grid(plotlist=list(h_ie, f_ie, plot.hippo_circular_reads, plot.cortex_circular_reads, plot.hippo_cdr1, plot.cortex_cdr1), ncol=2, labels=c("A","","B","", "C",""))
+ plot.hippo_circular_reads
+ plot.cortex_circular_reads
+ plot.hippo_cdr1
+ plot.cortex_cdr1
   
-  dev.off()
 
   
   write.table(circ_all_cortex, "cortex_circRNAs.tsv", sep="\t", quote=F, col.names=T, row.names=F)
@@ -827,10 +583,10 @@ hippo_lin_circ_expr <- circ_hippo_expr %>% left_join(circ_hippo_id_conversion %>
 
 
 
-hippo_19_15 <- hippo_lin_circ_expr %>% filter(H15+H19>30) %>% ggplot(aes(x=log2(H19+5)-log2(H15+5), log2(H19_l+5)-log2(H15_l+5), col=log2(H15+1)))+geom_point() +xlab("circ LFC") + ylab("linear LFC")+
+hippo_19_15 <- hippo_lin_circ_expr %>% filter(H15+H19>30) %>% ggplot(aes(x=log2(H19+5)-log2(H15+5), log2(H19_l+5)-log2(H15_l+5)))+geom_point() +xlab("circ LFC") + ylab("linear LFC")+
   theme(plot.title = element_text(size=15, face="bold", hjust = 0.5), legend.text = element_text(size=10)) + ggtitle("Hippocampus: 15:00 vs 19:00") +geom_vline(xintercept = 0) + geom_hline(yintercept =0)+xlim(-2,2)+ylim(-2,2)
 
-cortex_23_19 <- cortex_lin_circ_expr %>% filter(F23+F19>30) %>% ggplot(aes(x=log2(F23+5)-log2(F19+5), log2(F23_l+5)-log2(F19_l+5), col=log2(F23+1)))+geom_point() +xlab("circ LFC") + ylab("linear LFC")+
+cortex_23_19 <- cortex_lin_circ_expr %>% filter(F23+F19>30) %>% ggplot(aes(x=log2(F23+5)-log2(F19+5), log2(F23_l+5)-log2(F19_l+5)))+geom_point() +xlab("circ LFC") + ylab("linear LFC")+
   theme(plot.title = element_text(size=15, face="bold", hjust = 0.5), legend.text = element_text(size=10)) + ggtitle("Cortex: 23:00 vs 19:00") +geom_vline(xintercept = 0) + geom_hline(yintercept =0)+xlim(-2,2)+ylim(-2,2)
 
   
@@ -839,7 +595,7 @@ cowplot::plot_grid(cortex_23_19, hippo_19_15, labels=c("A","B"), ncol=2)
  dev.off()
 
 
-#################################### last figure
+#################################### Figure 4 
 
 
 
