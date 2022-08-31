@@ -26,8 +26,6 @@ genes<-readxl::read_xls("./data/elife-10518-supp2-v2.xls") %>% filter(`WGCNA mod
 
 colnames(genes)<-c("ensembls", "genes")
 
-
-
 aln_stats_scn <- read.table("./data/SCN_stats.csv", sep='\t', header=T) %>% tibble::as_tibble() %>% left_join(covariate, by=c("sample_id"="filename")) %>% mutate(sample=label) %>% dplyr::select(sample, key, value)
 
 scn_reads_all <- aln_stats_scn %>% filter(key=="Number of input reads") %>% mutate(mean.v=mean(value)) %>% mutate(norm_factor=mean.v/value)
@@ -37,7 +35,6 @@ scn_reads_um <- aln_stats_scn %>% filter(key=="Number of unmapped reads")
 ### read circRNA count data 
 
 circ_all_scn<-readRDS("data/circ_all_scn.rds")
-
 
 # Figure 1 A (circRNA count per time-point)
 
@@ -351,6 +348,13 @@ cowplot::plot_grid(cdr1_lin, cyrano_lin, ncol=2, labels=c("A", "B"))
 ######### Figure 3 A (Cortex, exonic and intronic rates)
 
 
+## ZT1 is F7 (07:00)
+## ZT5 is F11 (11:00)
+## ZT9 is F15 (15:00)
+## ZT13 is F19 (19:00)
+## ZT17 is F23 (23:00)
+## ZT21 is F3 (03:00)
+
 f<-readRDS("data/frontal_cortex_exonic_intronic_rates.RDS")
 
 f.1 <- f %>% filter(time=="F7") %>% mutate(time="F7.1")
@@ -436,12 +440,16 @@ plot.cortex_circular_reads.1  <- circ_all_cortex %>% group_by(sample_id) %>% sum
   theme(legend.title = element_blank(), plot.title = element_text(size=15, face="bold", hjust = 0.5), legend.position = c(0.25,0.9), legend.text = element_text(size=10)) + ylim(0,30000)  
 
   
+plot.cortex_circular_reads.1 %>% pairwise_t_test(AllHeadToTail_norm ~ time, p.adjust.method = "bonferroni")
+
   
   plot.cortex_cdr1.1 <- circ_all_cortex %>% filter(circRNA_ID == "chrX:61183248|61186174") %>% left_join(rc_cortex)  %>% mutate(htt_reads=X.junction_reads * read_count_norm)
   plot.cortex_cdr1.2 <-  plot.cortex_cdr1.1 %>% filter(time=="F7") %>% mutate(time="F7.1")
   
   
   plot.cortex_cdr1.data <- bind_rows(plot.cortex_cdr1.1, plot.cortex_cdr1.2)
+
+
   
 plot.cortex_cdr1 <- plot.cortex_cdr1.data %>% ggline(x="time", y="htt_reads", add = c("mean_sd", "jitter"), col="darkred", shape = 5, point.size=3) + guides(fill=FALSE) + scale_x_discrete(limits=c("F7", "F11", "F15", "F19", "F23","F3", "F7.1")) + 
   annotate("rect", xmin = 3.75, xmax = 6.75, ymin = -Inf, ymax = Inf, alpha=0.5) + ylim(0,2300)+
@@ -457,10 +465,16 @@ circ_cortex_expr<-circ_all_cortex %>% dplyr::select(circRNA_ID, X.junction_reads
  plot.hippo_circular_reads.1 <- circ_all_hippo %>% group_by(sample_id) %>% summarize(AllHeadToTailReads=sum(X.junction_reads)) %>% 
   left_join(rc, by=c("sample_id")) %>% mutate(AllHeadToTail_norm=AllHeadToTailReads * read_count_norm) %>%
   mutate(time=gsub("\\_.*","",sample_id)) 
+
+
+
   
   plot.hippo_circular_reads.2<-plot.hippo_circular_reads.1 %>% filter(time=="H7") %>% mutate(time="H7.1")
   
-  plot.hippo_circular_reads.data <- bind_rows(plot.hippo_circular_reads.1, plot.hippo_circular_reads.2)
+plot.cortex_circular_reads.1 %>% pairwise_t_test(AllHeadToTail_norm ~ time, p.adjust.method = "bonferroni")
+
+
+plot.hippo_circular_reads.data <- bind_rows(plot.hippo_circular_reads.1, plot.hippo_circular_reads.2)
   
 plot.hippo_circular_reads <- plot.hippo_circular_reads.data %>% ggline(x="time", y="AllHeadToTail_norm", add = c("mean_sd","jitter"), shape = 5, color="darkred", palette = "jco", point.size = 3) + annotate("rect", xmin = 3.75, xmax = 6.75, ymin = -Inf, ymax = Inf, alpha=0.5) + scale_x_discrete(limits=c("H7", "H11", "H15", "H19", "H23", "H3", "H7.1")) + theme(text = element_text(size=15), axis.text.y=element_text(size=12), axis.text.x=element_text(size=12))+ylab("norm. # of head-to-tail reads")+xlab("time of the day") + ggtitle("circRNAs in hippocampus")  + theme(legend.title = element_blank(), plot.title = element_text(size=15, face="bold", hjust = 0.5), legend.position = c(0.25,0.9), legend.text = element_text(size=10))  +ylim(0,30000)
 
